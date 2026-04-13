@@ -1,27 +1,23 @@
-AI Resume Screener (PoC)
+# AI Resume Screener (PoC)
+
 A Proof-of-Concept backend system that automatically screens candidate resumes using AI.
 
 The system allows:
+* **Hiring managers** to create job openings
+* **Candidates** to submit applications with PDF resumes
+* **AI** to evaluate resumes against job descriptions
 
-Hiring managers to create job openings
+## Tech Stack
 
-Candidates to submit applications with PDF resumes
+* **Python**
+* **Flask**
+* **SQLite**
+* **OpenAI API**
+* **pdfplumber**
 
-AI to evaluate resumes against job descriptions
+## System Architecture
 
-Tech Stack
-Python
-
-Flask
-
-SQLite
-
-OpenAI API
-
-pdfplumber
-
-System Architecture
-Code snippet
+```mermaid
 flowchart LR
     Candidate -->|POST /applications| API[Flask API]
     Manager -->|CRUD Jobs| API
@@ -32,60 +28,55 @@ flowchart LR
     Worker --> AI[OpenAI]
     AI --> Worker
     Worker --> DB
-Workflow
-Candidate uploads a PDF resume
+```
 
-Flask API stores the file and extracts text via pdfplumber
+## Workflow
 
-Application is saved to SQLite with status pending
+1.  **Candidate** uploads a PDF resume
+2.  **Flask API** stores the file and extracts text via **pdfplumber**
+3.  **Application** is saved to **SQLite** with status **pending**
+4.  **Background worker** sends extracted text to **AI**
+5.  **AI** returns **accepted** or **rejected**
+6.  **Database** is updated with the final result
 
-Background worker sends extracted text to AI
+## Installation
 
-AI returns accepted or rejected
+**git clone &lt;repo&gt;** **cd ai-resume-screener**
 
-Database is updated with the final result
+**Create environment:** `python3 -m venv venv`  
+`source venv/bin/activate`
 
-Installation
-git clone <repo> cd ai-resume-screener
+**Install dependencies:** `pip install -r requirements.txt`
 
-Create environment: python3 -m venv venv
+**Set API key:** `export OPENAI_API_KEY=your_key`
 
-source venv/bin/activate
+**Run server:** `python3 app.py`  
+*(Note: The database and tables are generated automatically on the first run)*
 
-Install dependencies: pip install -r requirements.txt
+**Server runs on:** `http://127.0.0.1:5000`
 
-Set API key: export OPENAI_API_KEY=your_key
+## API Examples
 
-Run server: python3 app.py
+### Create Job
+**POST /jobs**
 
-(Note: The database and tables are generated automatically on the first run)
-
-Server runs on: http://127.0.0.1:5000
-
-API Examples
-Create Job
-
-POST /jobs
-
-JSON
+```json
 {
   "title": "Python Developer",
   "description": "Backend development",
   "requirements": "Flask, SQL"
 }
-Submit Application
+```
 
-POST /applications
+### Submit Application
+**POST /applications**
 
-Form-data:
+**Form-data:**
+* `job_id`
+* `applicant_name`
+* `applicant_email`
+* `resume` (PDF file)
 
-job_id
+## Project Status
 
-applicant_name
-
-applicant_email
-
-resume (PDF file)
-
-Project Status
 PoC implementation of an AI-assisted resume screening backend.
