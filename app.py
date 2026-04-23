@@ -1,7 +1,7 @@
 import threading
+import sqlite3
 from flask import Flask, request, jsonify, g
 from werkzeug.utils import secure_filename
-import sqlite3
 import config
 from services.pdf_service import extract_text_from_pdf
 from services.ai_service import screen_application_async
@@ -17,31 +17,57 @@ def get_db():
 
 
 @app.teardown_appcontext
-def close_db(e=None):
-    db = g.pop("db", None)
-    if db is not None: db.close()
+def close_db(e_None):
+    db = g.pop("db",None)
+    if db is not None:
+        db.close()
 
 
 def init_db():
+    """Initializes the database using the fixed schema logic."""
     with sqlite3.connect(config.DB_PATH) as conn:
+        # Tables
         conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT,
-                job_text TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                requirements TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )""")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS applications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_id INTEGER,
-                applicant_name TEXT,
-                applicant_email TEXT,
+                job_id INTEGER NOT NULL,
+                applicant_name TEXT NOT NULL,
+                applicant_email TEXT NOT NULL,
                 resume_text TEXT,
-                filter_status TEXT DEFAULT 'pending',
+                filter_status TEXT DEFAULT 'pending'
+                    CHECK(filter_status IN ('pending','accepted','rejected')),
                 ai_feedback TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                prompt_version TEXT,
+                ai_model TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
             )""")
+
+        # Indexes
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_applications_job ON applications(job_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(filter_status)")
+
+        # Triggers
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS jobs_updated_at AFTER UPDATE ON jobs
+            BEGIN
+                UPDATE jobs SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+            END;""")
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS apps_updated_at AFTER UPDATE ON applications
+            BEGIN
+                UPDATE applications SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+            END;""")
 
 
 @app.route("/", methods=["GET"])
@@ -63,10 +89,14 @@ def create_job():
     file.save(path)
 
     # Extract text from the Job PDF
-    job_text = extract_text_from_pdf(path)
+    job_content = extract_text_from_pdf(path)
 
     db = get_db()
-    cur = db.execute("INSERT INTO jobs (title, job_text) VALUES (?, ?)", (title, job_text))
+    # Mapping extracted text to the 'description' column per schema.sql
+    cur = db.execute(
+        "INSERT INTO jobs (title, description) VALUES (?, ?)",
+        (title, job_content)
+    )
     db.commit()
     return jsonify({"id": cur.lastrowid, "message": "Job opening PDF processed"}), 201
 
@@ -89,7 +119,8 @@ def submit_application():
     resume_text = extract_text_from_pdf(path)
 
     db = get_db()
-    job = db.execute("SELECT job_text FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    # Updated to select 'description' instead of 'job_text'
+    job = db.execute("SELECT description FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not job:
         return jsonify({"error": "Job not found"}), 404
 
@@ -100,10 +131,10 @@ def submit_application():
     db.commit()
     app_id = cur.lastrowid
 
-    # Run AI screening comparing CV text vs Job text
+    # Run AI screening
     threading.Thread(
         target=screen_application_async,
-        args=(app_id, resume_text, job['job_text']),
+        args=(app_id, resume_text, job['description']),
         daemon=True
     ).start()
 
@@ -113,8 +144,10 @@ def submit_application():
 @app.route("/jobs/<int:job_id>/applications", methods=["GET"])
 def get_accepted(job_id):
     db = get_db()
-    apps = db.execute("SELECT * FROM applications WHERE job_id = ? AND filter_status = 'accepted'",
-                      (job_id,)).fetchall()
+    apps = db.execute(
+        "SELECT * FROM applications WHERE job_id = ? AND filter_status = 'accepted'",
+        (job_id,)
+    ).fetchall()
     return jsonify([dict(row) for row in apps])
 
 

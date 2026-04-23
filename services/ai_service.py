@@ -32,7 +32,7 @@ def screen_application_async(application_id, resume_text, job_text):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
