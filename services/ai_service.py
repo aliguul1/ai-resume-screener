@@ -2,6 +2,7 @@ import json
 import sqlite3
 from openai import OpenAI
 import config
+from config import AI_MODEL
 
 
 def screen_application_async(application_id, resume_text, job_text):
@@ -32,7 +33,7 @@ def screen_application_async(application_id, resume_text, job_text):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=AI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )

@@ -107,30 +107,111 @@ def list_all_jobs():
     return jsonify([dict(row) for row in jobs])
 
 
+# @app.route("/jobs/<int:job_id>", methods=["PUT"])
+# def update_job(job_id):
+#     """UPDATE: Update job title and description."""
+#     data = request.json
+#     title = data.get("title")
+#     description = data.get("description")
+#
+#     db = get_db()
+#     db.execute(
+#         "UPDATE jobs SET title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?",
+#         (title, description, job_id)
+#     )
+#     db.commit()
+#     return jsonify({"message": "Job updated"}), 200
+
 @app.route("/jobs/<int:job_id>", methods=["PUT"])
 def update_job(job_id):
-    """UPDATE: Update job title and description."""
-    data = request.json
-    title = data.get("title")
-    description = data.get("description")
+    """UPDATE: Update job title, description, or the PDF file itself."""
+    title = request.form.get("title")
+    description = request.form.get("description")
+    file = request.files.get("job_pdf")  # Look for a new file
 
     db = get_db()
+
+    # 1. If a new file is provided, process it first
+    if file:
+        # If no new title is provided, we need the current one to name the file
+        current_title = title
+        if not current_title:
+            job = db.execute("SELECT title FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            current_title = job["title"] if job else "updated_job"
+
+        filename = secure_filename(f"job_{current_title}.pdf")
+        path = config.UPLOAD_DIR / filename
+        file.save(path)
+
+        # Extract the new text from the new PDF
+        description = extract_text_from_pdf(path)
+
+    # 2. Update the database
+    # If 'description' was updated by the file logic above, it saves the new text.
+    # If no file was sent, 'description' remains what came from request.form (usually None).
     db.execute(
         "UPDATE jobs SET title = COALESCE(?, title), description = COALESCE(?, description) WHERE id = ?",
         (title, description, job_id)
     )
     db.commit()
-    return jsonify({"message": "Job updated"}), 200
+
+    return jsonify({"message": "Job title and/or job PDF(file) updated successfully"}), 200
+# @app.route("/jobs/<int:job_id>", methods=["DELETE"])
+# def delete_job(job_id):
+#     """DELETE: Remove job and its applications."""
+#     db = get_db()
+#     db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+#     db.commit()
+#     return jsonify({"message": "Job deleted"}), 200
+import os
+import glob
+from flask import jsonify
 
 
 @app.route("/jobs/<int:job_id>", methods=["DELETE"])
 def delete_job(job_id):
-    """DELETE: Remove job and its applications."""
+    """DELETE: Remove job record, all associated application files, and the job PDF."""
     db = get_db()
+
+    # 1. Fetch the job title to find the specific job PDF
+    job = db.execute("SELECT title FROM jobs WHERE id = ?", (job_id,)).fetchone()
+
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    # 2. Construct path for the Job Description PDF (job_{title}.pdf)
+    job_filename = secure_filename(f"job_{job['title']}.pdf")
+    job_path = config.UPLOAD_DIR / job_filename
+
+    # 3. Construct path for Application CVs (cv_{email}_{job_id}.pdf)
+    # Since email varies, we use a wildcard (*) for the email part[cite: 1]
+    cv_pattern = str(config.UPLOAD_DIR / f"cv_*_{job_id}.pdf")
+
+    # --- PHYSICAL FILE DELETION ---
+
+    # Delete the Job Description file if it exists[cite: 1]
+    if job_path.exists():
+        try:
+            os.remove(job_path)
+        except Exception as e:
+            print(f"Error deleting job PDF: {e}")[cite: 1]
+
+    # Delete all applicant CVs linked to this job_id[cite: 1]
+    for cv_file in glob.glob(cv_pattern):
+        try:
+            os.remove(cv_file)
+        except Exception as e:
+            print(f"Error deleting applicant CV {cv_file}: {e}")[cite: 1]
+
+    # --- DATABASE DELETION ---
+
+    # Delete the record (triggers CASCADE for applications in the DB)[cite: 1]
     db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
     db.commit()
-    return jsonify({"message": "Job deleted"}), 200
 
+    return jsonify({
+        "message": f"Job {job_id} deleted. Job PDF and all related CVs removed."
+    }), 200
 
 @app.route("/applications", methods=["POST"])
 def submit_application():
